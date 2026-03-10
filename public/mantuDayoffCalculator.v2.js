@@ -1,28 +1,64 @@
+/**
+ * Mantu Day-off Calculator V2
+ *
+ * A bookmarklet-loaded script that calculates remaining day-offs for Mantu employees
+ * based on data scraped from the ARP timesheet page (Quasar-based UI).
+ *
+ * Key differences from V1:
+ * - V1 had access to full history and calculated year-by-year from the joining year.
+ * - V2 works with the new ARP page which lacks full history, so it starts from
+ *   FIRST_CALCULATED_YEAR (2026) and uses a user-inputted "remaining 2025 day-offs"
+ *   as the initial carried-over value.
+ *
+ * Day-off policy rules:
+ * - Base allowance: 14 days/year
+ * - Seniority bonus: +0.5 days per year of service (applied at joining anniversary)
+ * - Carryover: up to 5 unused days carry over to next year
+ * - Reset date: April 30 - carried-over days must be used before this date
+ * - Carried-over days used after the reset date are forfeited
+ *
+ * Flow:
+ * 1. If not on the holidays history page -> redirect there
+ * 2. If table limit != 100 -> select max rows and wait for table to render
+ * 3. If joining date or remaining 2025 day-offs not set -> show input modal
+ * 4. Otherwise -> show result modal with per-year breakdown
+ */
 !(async function () {
   const VERSION = "v2.0.0";
+
+  /* --- Configuration --- */
+
   const HOLIDAYS_PAGE_BASE = "https://timesheet.arp.mantu.com/my-history";
   const HOLIDAYS_PAGE_URL =
     "https://timesheet.arp.mantu.com/my-history?startDate=2021-01-01&absenceCategoryId=4&absenceCategoryParentId=1&orderBy=startDate&descending=true&page=1&limit=7&tab=pendingHolidays";
   const CALCULATOR_ELEMENT_ID = "mantuDayoffCalculator";
+
+  /* localStorage keys for persisting user inputs */
   const JOINING_DATE_STORAGE_KEY = "mantu-dayoff-calculator-joining-date";
   const REMAINING_2025_DAYOFF_STORAGE_KEY = "mantu-dayoff-calculator-remaining-2025";
 
-  const BASE_DAYOFF_ALLOWANCE = 14;
-  const YEARLY_INCREMENT = 0.5;
-  const MAX_CARRYOVER_DAYS = 5;
-  const RESET_DAY = 30;
-  const RESET_MONTH = 4;
-  const ONE_DAY_MS = 864e5;
-  const MAX_ROWS_PER_PAGE = "100";
+  /* Day-off policy constants */
+  const BASE_DAYOFF_ALLOWANCE = 14;   /* Base annual day-off allowance */
+  const YEARLY_INCREMENT = 0.5;       /* Additional days per year of seniority */
+  const MAX_CARRYOVER_DAYS = 5;       /* Max days that can carry over to next year */
+  const RESET_DAY = 30;               /* Day of the carryover reset date */
+  const RESET_MONTH = 4;              /* Month of the carryover reset date (April) */
+
+  const ONE_DAY_MS = 864e5;           /* Milliseconds in one day */
+  const MAX_ROWS_PER_PAGE = "100";    /* Max rows to display in the ARP table */
   const DEBUG_MODE = false;
   const CURRENT_YEAR = new Date().getFullYear();
-  const FIRST_CALCULATED_YEAR = 2026;
+  const FIRST_CALCULATED_YEAR = 2026; /* V2 starts calculating from this year */
 
+  /* Month abbreviation mapping for parsing ARP date format (e.g. "Apr 28th, 2026") */
   const MONTH_ABBR = {
     Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
     Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
   };
 
+  /* Vietnam public holidays - inlined to avoid network dependency.
+   * Only years >= FIRST_CALCULATED_YEAR are needed.
+   * Update this when new year holidays are announced. */
   const publicHolidays = {
     "2026": [
       "2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18",
@@ -30,18 +66,21 @@
       "2026-05-01", "2026-09-01", "2026-09-02", "2026-11-24"
     ]
   };
-  let publicHolidaySets = {};
+  let publicHolidaySets = {}; /* Cached Set objects keyed by year */
 
   /* --- Utilities --- */
 
+  /** Logs to console only when DEBUG_MODE is enabled */
   function debugLog(message) {
     if (DEBUG_MODE) console.error(message);
   }
 
+  /** Returns the number of days in a given month (1-indexed) and year */
   function getDaysInMonth(month, year) {
     return new Date(year, month, 0).getDate();
   }
 
+  /** Returns a Set of timestamps for public holidays in the given year (lazy-cached) */
   function getHolidaySet(year) {
     if (!publicHolidaySets[year] && publicHolidays[year]) {
       publicHolidaySets[year] = new Set(
@@ -68,8 +107,9 @@
     };
   }
 
-  /* --- Data access --- */
+  /* --- Data access (localStorage + DOM scraping) --- */
 
+  /** Retrieves the joining date from localStorage. Returns { day, month, year, ... } or null */
   function getJoiningDate() {
     const stored = localStorage.getItem(JOINING_DATE_STORAGE_KEY);
     if (!stored) return null;
@@ -85,12 +125,18 @@
     };
   }
 
+  /** Retrieves the user-inputted remaining 2025 day-offs from localStorage. Returns float or null */
   function getRemaining2025Dayoff() {
     const stored = localStorage.getItem(REMAINING_2025_DAYOFF_STORAGE_KEY);
     if (stored === null) return null;
     return parseFloat(stored);
   }
 
+  /**
+   * Scrapes the ARP Quasar table rows and extracts day-off entries.
+   * Each row contains: status, start date + AM/PM, end date + AM/PM, total days.
+   * Returns an array of entry objects.
+   */
   function parseHolidayRows() {
     const rows = document.querySelectorAll("table.q-table tbody tr.q-tr");
     return Array.from(rows).map((row) => {
@@ -147,8 +193,20 @@
     });
   }
 
-  /* --- Core calculation (from v1) --- */
+  /* --- Core calculation (ported from v1) --- */
 
+  /**
+   * Counts working days in a date range, split at a given point.
+   * Used to split day-off entries across year boundaries or the reset date.
+   *
+   * @param {Array} start       - [day, month, year] of the range start
+   * @param {string} startAMPM  - "AM" or "PM" (PM means half-day start, subtract 0.5)
+   * @param {Array} end         - [day, month, year] of the range end
+   * @param {string} endAMPM    - "AM" or "PM" (AM means half-day end, subtract 0.5)
+   * @param {Array} split       - [day, month, year] the split point
+   * @param {boolean} countAllDays - If true, count all calendar days (not just working days)
+   * @returns {{ daysUntilPoint: number, daysAfterPoint: number }}
+   */
   function calculateDaysBetween(
     [startDay, startMonth, startYear],
     startAMPM,
@@ -196,6 +254,7 @@
     };
   }
 
+  /** Returns true if the entry is entirely within the given year and ends on or before the reset month */
   function isBeforeResetInSameYear(entry, year) {
     return (
       entry.startYear === entry.endYear &&
@@ -204,6 +263,27 @@
     );
   }
 
+  /**
+   * Main calculation for a single year.
+   *
+   * Computes:
+   * 1. Total allowed day-offs (prorated by seniority, split at joining anniversary)
+   *    - Before anniversary: previous year's seniority rate
+   *    - After anniversary: current year's seniority rate
+   *    Formula: (BASE + prevSeniority * INCREMENT) / 12 * monthsBefore
+   *           + (BASE + currSeniority * INCREMENT) / 12 * monthsAfter
+   *
+   * 2. Total day-offs taken (from validated entries in the ARP table)
+   *    Handles entries that: span year boundaries, span the reset date, or are within the year
+   *
+   * 3. Carryover calculation:
+   *    remaining = allowed + min(carriedOver, takenBeforeReset) - totalTaken
+   *    toCarryOver = min(MAX_CARRYOVER_DAYS, remaining)
+   *
+   * @param {number} year - The year to calculate
+   * @param {number} carriedOverDays - Days carried over from the previous year
+   * @returns {Object} Calculation results for the year
+   */
   function calculateYearDayoffs(year, carriedOverDays) {
     debugLog(`Year: ${year}`);
 
@@ -344,6 +424,13 @@
 
   /* --- Rendering --- */
 
+  /**
+   * Renders the per-year day-off breakdown into the result modal.
+   * Loops from FIRST_CALCULATED_YEAR to CURRENT_YEAR, chaining carryover
+   * from each year to the next. The first year uses the user-inputted
+   * remaining 2025 day-offs as its carried-over value.
+   * Years are displayed in reverse order (most recent first).
+   */
   function renderDayoffInfo(shadowRoot) {
     const joiningDate = getJoiningDate();
     const remaining2025 = getRemaining2025Dayoff();
@@ -394,6 +481,7 @@
   const SUN_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
   const MOON_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
 
+  /** Toggles Quasar dark/light mode via localStorage and reloads the page to apply */
   function toggleTheme() {
     const dark = document.body.classList.contains("body--dark");
     localStorage.setItem("darkMode", dark ? "__q_bool|0" : "__q_bool|1");
@@ -402,6 +490,12 @@
 
   /* --- Modal --- */
 
+  /**
+   * Shows the input modal for collecting user data (joining date + remaining 2025 day-offs).
+   * - Confirm button is disabled until both fields are valid
+   * - Validates on every input change and also on confirm click (guard against DevTools bypass)
+   * - Saves values to localStorage on confirm, then calls onConfirm callback
+   */
   function showInputModal(onConfirm) {
     document.getElementById(CALCULATOR_ELEMENT_ID)?.remove();
 
@@ -567,6 +661,11 @@
     });
   }
 
+  /**
+   * Shows the result modal with per-year day-off breakdown.
+   * - "Update" button reopens the input modal to change user data
+   * - "Close" button dismisses the modal
+   */
   function showResultModal() {
     document.getElementById(CALCULATOR_ELEMENT_ID)?.remove();
 
@@ -677,13 +776,15 @@
     });
   }
 
-  /* --- Main --- */
+  /* --- Main entry point --- */
 
+  /* Step 1: Redirect to the holidays history page if not already there */
   if (!window.location.href.startsWith(HOLIDAYS_PAGE_BASE) && !document.getElementById(CALCULATOR_ELEMENT_ID)) {
     window.location.href = HOLIDAYS_PAGE_URL;
     return;
   }
 
+  /* Step 2: Ensure all table rows are visible (select max rows if needed) */
   if (!document.getElementById(CALCULATOR_ELEMENT_ID)) {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("limit") !== MAX_ROWS_PER_PAGE) {
@@ -699,7 +800,7 @@
     }
   }
 
-  /* Show input modal if data missing, otherwise show results */
+  /* Step 3: Show input modal if data missing, otherwise show results directly */
   if (!getJoiningDate() || getRemaining2025Dayoff() === null) {
     showInputModal(showResultModal);
   } else {
