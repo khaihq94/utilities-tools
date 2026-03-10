@@ -255,6 +255,8 @@
     let totalDayoffsTaken = 0;
     let dayoffsTakenBeforeReset = 0;
 
+    console.log(`[${year}] All parsed entries:`, allEntries);
+
     const validatedEntries = allEntries.filter((entry) => {
       if (entry.status !== "Validated") return false;
       const isSameYear = entry.startYear === entry.endYear && entry.endYear === year;
@@ -262,6 +264,8 @@
       const endsAfterYear = entry.startYear === year && entry.endYear > year;
       return isSameYear || startsBeforeYear || endsAfterYear;
     });
+
+    console.log(`[${year}] Validated entries used for calculation:`, validatedEntries);
 
     for (const entry of validatedEntries) {
       const entryStart = [entry.startDay, entry.startMonth, entry.startYear];
