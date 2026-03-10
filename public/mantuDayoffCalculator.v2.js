@@ -462,6 +462,7 @@
         }
         .secondaryBtn { background: #9E9E9E; }
         .primaryBtn { background: #6d2077; }
+        .primaryBtn:disabled { background: #b0b0b0; cursor: not-allowed; }
         .version {
           margin-top: 20px;
           text-align: right;
@@ -484,35 +485,49 @@
 
           <div class="footer">
             <button id="cancelBtn" class="btn secondaryBtn">Cancel</button>
-            <button id="confirmBtn" class="btn primaryBtn">Confirm</button>
+            <button id="confirmBtn" class="btn primaryBtn" disabled>Confirm</button>
           </div>
           <div class="version">${VERSION}</div>
         </div>
       </div>
     `;
 
+    const joiningDateInput = shadowRoot.querySelector("#joiningDate");
+    const remainingInput = shadowRoot.querySelector("#remaining2025");
+    const confirmBtn = shadowRoot.querySelector("#confirmBtn");
+    const errorEl = shadowRoot.querySelector("#remaining2025Error");
+
+    function validateForm() {
+      const joiningDateVal = joiningDateInput.value;
+      const remainingVal = parseFloat(remainingInput.value);
+      const isRemainingValid =
+        !isNaN(remainingVal) &&
+        remainingVal >= 0 &&
+        remainingVal <= 5 &&
+        remainingVal % 0.5 === 0;
+
+      errorEl.style.display = remainingInput.value !== "" && !isRemainingValid ? "block" : "none";
+      confirmBtn.disabled = !joiningDateVal || !isRemainingValid;
+    }
+
+    joiningDateInput.addEventListener("input", validateForm);
+    remainingInput.addEventListener("input", validateForm);
+    validateForm();
+
     shadowRoot.querySelector("#cancelBtn").addEventListener("click", () => {
       document.getElementById(CALCULATOR_ELEMENT_ID)?.remove();
     });
 
-    shadowRoot.querySelector("#confirmBtn").addEventListener("click", () => {
-      const joiningDateVal = shadowRoot.querySelector("#joiningDate").value;
-      const remainingVal = parseFloat(shadowRoot.querySelector("#remaining2025").value);
-      const errorEl = shadowRoot.querySelector("#remaining2025Error");
+    confirmBtn.addEventListener("click", () => {
+      const joiningDateVal = joiningDateInput.value;
+      const remainingVal = parseFloat(remainingInput.value);
 
-      /* Validate remaining dayoff: 0 to 5, step 0.5 */
-      if (
-        isNaN(remainingVal) ||
-        remainingVal < 0 ||
-        remainingVal > 5 ||
-        remainingVal % 0.5 !== 0
-      ) {
-        errorEl.style.display = "block";
-        return;
-      }
-      errorEl.style.display = "none";
-
-      if (!joiningDateVal) return;
+      const isRemainingValid =
+        !isNaN(remainingVal) &&
+        remainingVal >= 0 &&
+        remainingVal <= 5 &&
+        remainingVal % 0.5 === 0;
+      if (!joiningDateVal || !isRemainingValid) return;
 
       localStorage.setItem(JOINING_DATE_STORAGE_KEY, joiningDateVal);
       localStorage.setItem(REMAINING_2025_DAYOFF_STORAGE_KEY, String(remainingVal));
