@@ -39,11 +39,15 @@
 
   /* Day-off policy constants */
   const BASE_DAYOFF_ALLOWANCE = 14;   /* Base annual day-off allowance */
-  const YEARLY_INCREMENT = 0.5;       /* Additional days per year of seniority */
+  const SENIORITY_INCREMENT = 0.5;        /* Additional day-off days per year of seniority */
   const MAX_CARRYOVER_DAYS = 5;       /* Max days that can carry over to next year */
-  const RESET_DAY = 30;               /* Day of the carryover reset date */
-  const RESET_MONTH = 4;              /* Month of the carryover reset date (April) */
+  const CARRYOVER_RESET_DAY = 30;               /* Day of the carryover reset date */
+  const CARRYOVER_RESET_MONTH = 4;              /* Month of the carryover reset date (April) */
 
+  const HALF_DAY = 0.5;                /* Half-day deduction for AM/PM entries */
+  const MONTHS_PER_YEAR = 12;
+  const DAYOFF_INPUT_STEP = 0.5;      /* Input step for remaining day-offs (0, 0.5, 1, ...) */
+  const TABLE_RENDER_DELAY_MS = 1000; /* Wait time for ARP table to render after changing rows */
   const ONE_DAY_MS = 864e5;           /* Milliseconds in one day */
   const MAX_ROWS_PER_PAGE = "100";    /* Max rows to display in the ARP table */
   const DEBUG_MODE = false;
@@ -81,7 +85,7 @@
   }
 
   /** Returns a Set of timestamps for public holidays in the given year (lazy-cached) */
-  function getHolidaySet(year) {
+  function getPublicHolidaySet(year) {
     if (!publicHolidaySets[year] && publicHolidays[year]) {
       publicHolidaySets[year] = new Set(
         publicHolidays[year].map((dateStr) => {
@@ -137,7 +141,7 @@
    * Each row contains: status, start date + AM/PM, end date + AM/PM, total days.
    * Returns an array of entry objects.
    */
-  function parseHolidayRows() {
+  function parseDayoffTableRows() {
     const rows = document.querySelectorAll("table.q-table tbody tr.q-tr");
     return Array.from(rows).map((row) => {
       const cells = row.querySelectorAll("td");
@@ -223,7 +227,7 @@
       return { daysUntilPoint: 0, daysAfterPoint: 0 };
     }
 
-    const holidaySet = getHolidaySet(splitYear);
+    const holidaySet = getPublicHolidaySet(splitYear);
 
     const countDays = (fromDate, toDate) => {
       let count = 0;
@@ -248,18 +252,18 @@
 
     return {
       daysUntilPoint:
-        countDays(startDate, splitDate) + (startAMPM === "PM" ? -0.5 : 0),
+        countDays(startDate, splitDate) + (startAMPM === "PM" ? -HALF_DAY : 0),
       daysAfterPoint:
-        countDays(dayAfterSplit, endDate) + (endAMPM === "AM" ? -0.5 : 0),
+        countDays(dayAfterSplit, endDate) + (endAMPM === "AM" ? -HALF_DAY : 0),
     };
   }
 
   /** Returns true if the entry is entirely within the given year and ends on or before the reset month */
-  function isBeforeResetInSameYear(entry, year) {
+  function isEntirelyBeforeResetDate(entry, year) {
     return (
       entry.startYear === entry.endYear &&
       entry.endYear === year &&
-      entry.endMonth <= RESET_MONTH
+      entry.endMonth <= CARRYOVER_RESET_MONTH
     );
   }
 
@@ -287,48 +291,48 @@
   function calculateYearDayoffs(year, carriedOverDays) {
     debugLog(`Year: ${year}`);
 
-    const allEntries = parseHolidayRows();
+    const allEntries = parseDayoffTableRows();
     const joiningDate = getJoiningDate();
     const { day: joiningDay, month: joiningMonth, year: joiningYear } = joiningDate;
     const yearsSinceJoining = year - joiningYear;
     const previousYearsSinceJoining = Math.max(0, yearsSinceJoining - 1);
 
-    /* Calculate proportional allowance based on joining month */
-    let fullMonthsBeforeJoining = 0;
-    let monthsAfterJoining = 12 - joiningMonth;
-    let daysBeforeJoiningInMonth = 0;
-    let daysAfterJoiningInMonth = 0;
-    const joiningMonthLength = getDaysInMonth(joiningMonth, year);
+    /* Calculate proportional allowance split at the joining anniversary */
+    let fullMonthsBeforeAnniversary = 0;
+    let fullMonthsAfterAnniversary = MONTHS_PER_YEAR - joiningMonth;
+    let daysBeforeAnniversaryInMonth = 0;
+    let daysAfterAnniversaryInMonth = 0;
+    const anniversaryMonthLength = getDaysInMonth(joiningMonth, year);
 
     if (year !== joiningYear) {
-      fullMonthsBeforeJoining = joiningMonth - 1;
+      fullMonthsBeforeAnniversary = joiningMonth - 1;
       const { daysUntilPoint, daysAfterPoint } = calculateDaysBetween(
         [1, joiningMonth, year],
         "AM",
-        [joiningMonthLength, joiningMonth, year],
+        [anniversaryMonthLength, joiningMonth, year],
         "PM",
         [joiningDay - 1, joiningMonth, year],
         true
       );
-      daysBeforeJoiningInMonth = daysUntilPoint;
-      daysAfterJoiningInMonth = daysAfterPoint;
+      daysBeforeAnniversaryInMonth = daysUntilPoint;
+      daysAfterAnniversaryInMonth = daysAfterPoint;
     } else {
       const { daysAfterPoint } = calculateDaysBetween(
         [1, joiningMonth, year],
         "AM",
-        [joiningMonthLength, joiningMonth, year],
+        [anniversaryMonthLength, joiningMonth, year],
         "AM",
         [joiningDay - 1, joiningMonth, year],
         true
       );
-      daysAfterJoiningInMonth = daysAfterPoint;
+      daysAfterAnniversaryInMonth = daysAfterPoint;
     }
 
     const totalAllowedDayoffs =
-      ((BASE_DAYOFF_ALLOWANCE + previousYearsSinceJoining * YEARLY_INCREMENT) / 12) *
-        (fullMonthsBeforeJoining + daysBeforeJoiningInMonth / joiningMonthLength) +
-      ((BASE_DAYOFF_ALLOWANCE + yearsSinceJoining * YEARLY_INCREMENT) / 12) *
-        (daysAfterJoiningInMonth / joiningMonthLength + monthsAfterJoining);
+      ((BASE_DAYOFF_ALLOWANCE + previousYearsSinceJoining * SENIORITY_INCREMENT) / MONTHS_PER_YEAR) *
+        (fullMonthsBeforeAnniversary + daysBeforeAnniversaryInMonth / anniversaryMonthLength) +
+      ((BASE_DAYOFF_ALLOWANCE + yearsSinceJoining * SENIORITY_INCREMENT) / MONTHS_PER_YEAR) *
+        (daysAfterAnniversaryInMonth / anniversaryMonthLength + fullMonthsAfterAnniversary);
 
     debugLog(`totalAllowedDayoff: ${totalAllowedDayoffs}`);
 
@@ -379,16 +383,16 @@
       }
 
       /* Entirely before the reset date */
-      if (isBeforeResetInSameYear(entry, year)) {
+      if (isEntirelyBeforeResetDate(entry, year)) {
         dayoffsTakenBeforeReset += entry.days;
       }
 
       /* Spans across the reset date (April -> May) */
-      if (entry.startMonth <= RESET_MONTH && entry.endMonth > RESET_MONTH) {
+      if (entry.startMonth <= CARRYOVER_RESET_MONTH && entry.endMonth > CARRYOVER_RESET_MONTH) {
         const { daysUntilPoint, daysAfterPoint } = calculateDaysBetween(
           entryStart, entry.startAMPM,
           entryEnd, entry.endAMPM,
-          [RESET_DAY, RESET_MONTH, year]
+          [CARRYOVER_RESET_DAY, CARRYOVER_RESET_MONTH, year]
         );
         dayoffsTakenBeforeReset += daysUntilPoint;
         totalDayoffsTaken += daysAfterPoint;
@@ -449,7 +453,7 @@
           <li>Total allowed dayoffs (seniority): <b>${result.totalAllowedDayoffs.toFixed(2)}</b> days</li>
           <li>Carried-over dayoffs from ${year - 1}: <b>${result.carriedOverDays.toFixed(2)}</b> days</li>
           <li>Total dayoffs taken: <b>${result.totalDayoffsTaken.toFixed(2)}</b> days</li>
-          <li>Dayoffs taken before ${RESET_DAY}/${RESET_MONTH}/${year}: <b>${result.dayoffsTakenBeforeReset.toFixed(2)}</b> days</li>
+          <li>Dayoffs taken before ${CARRYOVER_RESET_DAY}/${CARRYOVER_RESET_MONTH}/${year}: <b>${result.dayoffsTakenBeforeReset.toFixed(2)}</b> days</li>
           <li>Total dayoffs (excluding carried-over days) <sup><i>(3 - min(2,4))</i></sup>: <b>${(result.totalDayoffsTaken - Math.min(result.carriedOverDays, result.dayoffsTakenBeforeReset)).toFixed(2)}</b> days</li>`;
 
       if (year === CURRENT_YEAR) {
@@ -602,8 +606,8 @@
           <input type="date" id="joiningDate" value="${existingJoiningDate}"/>
 
           <label for="remaining2025">Number of day-offs carried over from 2025</label>
-          <input type="number" id="remaining2025" min="0" max="5" step="0.5" value="${existingRemaining}"/>
-          <div class="error" id="remaining2025Error">Value must be between 0 and 5, in increments of 0.5</div>
+          <input type="number" id="remaining2025" min="0" max="${MAX_CARRYOVER_DAYS}" step="${DAYOFF_INPUT_STEP}" value="${existingRemaining}"/>
+          <div class="error" id="remaining2025Error">Value must be between 0 and ${MAX_CARRYOVER_DAYS}, in increments of ${DAYOFF_INPUT_STEP}</div>
 
           <div class="footer">
             <button id="cancelBtn" class="btn secondaryBtn">Cancel</button>
@@ -627,8 +631,8 @@
       const isRemainingValid =
         !isNaN(remainingVal) &&
         remainingVal >= 0 &&
-        remainingVal <= 5 &&
-        remainingVal % 0.5 === 0;
+        remainingVal <= MAX_CARRYOVER_DAYS &&
+        remainingVal % DAYOFF_INPUT_STEP === 0;
 
       errorEl.style.display = remainingInput.value !== "" && !isRemainingValid ? "block" : "none";
       confirmBtn.disabled = !joiningDateVal || !isRemainingValid;
@@ -649,8 +653,8 @@
       const isRemainingValid =
         !isNaN(remainingVal) &&
         remainingVal >= 0 &&
-        remainingVal <= 5 &&
-        remainingVal % 0.5 === 0;
+        remainingVal <= MAX_CARRYOVER_DAYS &&
+        remainingVal % DAYOFF_INPUT_STEP === 0;
       if (!joiningDateVal || !isRemainingValid) return;
 
       localStorage.setItem(JOINING_DATE_STORAGE_KEY, joiningDateVal);
@@ -790,13 +794,13 @@
     if (urlParams.get("limit") !== MAX_ROWS_PER_PAGE) {
       document.querySelector("div.q-table__bottom .q-field__native.row.items-center").click();
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, TABLE_RENDER_DELAY_MS));
 
       const maxRowsOption = Array.from(document.querySelectorAll(".q-item__label span"))
         .find((s) => s.textContent.trim() === MAX_ROWS_PER_PAGE);
       if (maxRowsOption) maxRowsOption.click();
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, TABLE_RENDER_DELAY_MS));
     }
   }
 
