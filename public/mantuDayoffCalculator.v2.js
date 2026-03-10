@@ -6,6 +6,7 @@
   const CALCULATOR_ELEMENT_ID = "mantuDayoffCalculator";
   const JOINING_DATE_STORAGE_KEY = "mantu-dayoff-calculator-joining-date";
   const REMAINING_2025_DAYOFF_STORAGE_KEY = "mantu-dayoff-calculator-remaining-2025";
+
   const BASE_DAYOFF_ALLOWANCE = 14;
   const YEARLY_INCREMENT = 0.5;
   const MAX_CARRYOVER_DAYS = 5;
@@ -388,6 +389,25 @@
       `<ul>${htmlParts.reverse().join("")}</ul>`;
   }
 
+  /* --- Theme --- */
+
+  const SUN_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+  const MOON_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+
+  function toggleTheme(callback) {
+    const dark = document.body.classList.contains("body--dark");
+    if (dark) {
+      document.body.classList.remove("body--dark");
+      document.body.classList.add("body--light");
+      localStorage.setItem("darkMode", "__q_bool|0");
+    } else {
+      document.body.classList.remove("body--light");
+      document.body.classList.add("body--dark");
+      localStorage.setItem("darkMode", "__q_bool|1");
+    }
+    callback();
+  }
+
   /* --- Modal --- */
 
   function showInputModal(onConfirm) {
@@ -400,7 +420,7 @@
     const shadowRoot = containerDiv.attachShadow({ mode: "open" });
     const existingJoiningDate = localStorage.getItem(JOINING_DATE_STORAGE_KEY) || "";
     const existingRemaining = localStorage.getItem(REMAINING_2025_DAYOFF_STORAGE_KEY) || "";
-    const isDarkMode = document.body.classList.contains("body--dark");
+    const dark = document.body.classList.contains("body--dark");
 
     shadowRoot.innerHTML = `
       <style>
@@ -416,16 +436,29 @@
           z-index: 9999;
         }
         .modal-content {
-          background: ${isDarkMode ? "#1d1d1d" : "white"};
-          color: ${isDarkMode ? "#e0e0e0" : "inherit"};
+          background: ${dark ? "#1d1d1d" : "white"};
+          color: ${dark ? "#e0e0e0" : "inherit"};
           padding: 20px;
           border-radius: 8px;
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
           min-width: 350px;
         }
         .modal-content .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           font-weight: bold;
           margin-bottom: 10px;
+        }
+        .theme-toggle {
+          background: none;
+          border: 1px solid ${dark ? "#555" : "#ccc"};
+          border-radius: 4px;
+          padding: 4px 6px;
+          cursor: pointer;
+          color: ${dark ? "#e0e0e0" : "#333"};
+          display: flex;
+          align-items: center;
         }
         .modal-content label {
           display: block;
@@ -434,12 +467,12 @@
         }
         .modal-content input {
           padding: 8px;
-          border: 1px solid ${isDarkMode ? "#555" : "#ccc"};
+          border: 1px solid ${dark ? "#555" : "#ccc"};
           border-radius: 4px;
           width: 100%;
           box-sizing: border-box;
-          background: ${isDarkMode ? "#2c2c2c" : "white"};
-          color: ${isDarkMode ? "#e0e0e0" : "inherit"};
+          background: ${dark ? "#2c2c2c" : "white"};
+          color: ${dark ? "#e0e0e0" : "inherit"};
         }
         .modal-content .error {
           color: red;
@@ -472,7 +505,10 @@
       </style>
       <div class="modal-overlay">
         <div class="modal-content">
-          <div class="header">Mantu Day-off Calculator V2</div>
+          <div class="header">
+            <span>Mantu Day-off Calculator V2</span>
+            <button class="theme-toggle" id="themeToggle">${dark ? SUN_ICON : MOON_ICON}</button>
+          </div>
           <i>(*) The information below may contain discrepancies.<br/>
           For the most accurate details, please contact HR.</i>
 
@@ -496,6 +532,10 @@
     const remainingInput = shadowRoot.querySelector("#remaining2025");
     const confirmBtn = shadowRoot.querySelector("#confirmBtn");
     const errorEl = shadowRoot.querySelector("#remaining2025Error");
+
+    shadowRoot.querySelector("#themeToggle").addEventListener("click", () => {
+      toggleTheme(() => showInputModal(onConfirm));
+    });
 
     function validateForm() {
       const joiningDateVal = joiningDateInput.value;
@@ -545,7 +585,7 @@
     document.body.appendChild(containerDiv);
 
     const shadowRoot = containerDiv.attachShadow({ mode: "open" });
-    const isDarkMode = document.body.classList.contains("body--dark");
+    const dark = document.body.classList.contains("body--dark");
 
     shadowRoot.innerHTML = `
       <style>
@@ -561,8 +601,8 @@
           z-index: 9999;
         }
         .modal-content {
-          background: ${isDarkMode ? "#1d1d1d" : "white"};
-          color: ${isDarkMode ? "#e0e0e0" : "inherit"};
+          background: ${dark ? "#1d1d1d" : "white"};
+          color: ${dark ? "#e0e0e0" : "inherit"};
           padding: 20px;
           border-radius: 8px;
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
@@ -571,8 +611,21 @@
           overflow: auto;
         }
         .modal-content .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           font-weight: bold;
           margin-bottom: 10px;
+        }
+        .theme-toggle {
+          background: none;
+          border: 1px solid ${dark ? "#555" : "#ccc"};
+          border-radius: 4px;
+          padding: 4px 6px;
+          cursor: pointer;
+          color: ${dark ? "#e0e0e0" : "#333"};
+          display: flex;
+          align-items: center;
         }
         .modal-content ul { padding-left: 20px; }
         .modal-content ol { padding-left: 20px; }
@@ -605,7 +658,10 @@
       </style>
       <div class="modal-overlay">
         <div class="modal-content">
-          <div class="header">Mantu Day-off Calculator V2</div>
+          <div class="header">
+            <span>Mantu Day-off Calculator V2</span>
+            <button class="theme-toggle" id="themeToggle">${dark ? SUN_ICON : MOON_ICON}</button>
+          </div>
           <i>(*) The information below may contain discrepancies.<br/>
           For the most accurate details, please contact HR.</i>
           <div id="dayoffCalcInfo" class="dayoffs-calc-info"></div>
@@ -619,6 +675,10 @@
     `;
 
     renderDayoffInfo(shadowRoot);
+
+    shadowRoot.querySelector("#themeToggle").addEventListener("click", () => {
+      toggleTheme(showResultModal);
+    });
 
     shadowRoot.querySelector("#cancelBtn").addEventListener("click", () => {
       document.getElementById(CALCULATOR_ELEMENT_ID)?.remove();
