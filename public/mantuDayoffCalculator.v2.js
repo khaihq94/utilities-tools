@@ -1,5 +1,6 @@
 !(async function () {
   const VERSION = "v2.0.0";
+  const HOLIDAYS_PAGE_BASE = "https://timesheet.arp.mantu.com/my-history";
   const HOLIDAYS_PAGE_URL =
     "https://timesheet.arp.mantu.com/my-history?startDate=2021-01-01&absenceCategoryId=4&absenceCategoryParentId=1&orderBy=startDate&descending=true&page=1&limit=7&tab=pendingHolidays";
   const CALCULATOR_ELEMENT_ID = "mantuDayoffCalculator";
@@ -21,7 +22,13 @@
     Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
   };
 
-  let publicHolidays = null;
+  const publicHolidays = {
+    "2026": [
+      "2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18",
+      "2026-02-19", "2026-02-20", "2026-04-27", "2026-04-30",
+      "2026-05-01", "2026-09-01", "2026-09-02", "2026-11-24"
+    ]
+  };
   let publicHolidaySets = {};
 
   /* --- Utilities --- */
@@ -350,7 +357,7 @@
           <li>Total allowed dayoffs (seniority): <b>${result.totalAllowedDayoffs.toFixed(2)}</b> days</li>
           <li>Carried-over dayoffs from ${year - 1}: <b>${result.carriedOverDays.toFixed(2)}</b> days</li>
           <li>Total dayoffs taken: <b>${result.totalDayoffsTaken.toFixed(2)}</b> days</li>
-          <li>Dayoffs taken before ${RESET_DAY}-${RESET_MONTH}-${year}: <b>${result.dayoffsTakenBeforeReset.toFixed(2)}</b> days</li>
+          <li>Dayoffs taken before ${RESET_DAY}/${RESET_MONTH}/${year}: <b>${result.dayoffsTakenBeforeReset.toFixed(2)}</b> days</li>
           <li>Total dayoffs (excluding carried-over days) <sup><i>(3 - min(2,4))</i></sup>: <b>${(result.totalDayoffsTaken - Math.min(result.carriedOverDays, result.dayoffsTakenBeforeReset)).toFixed(2)}</b> days</li>`;
 
       if (year === CURRENT_YEAR) {
@@ -605,27 +612,24 @@
 
   /* --- Main --- */
 
-  if (window.location.href !== HOLIDAYS_PAGE_URL && !document.getElementById(CALCULATOR_ELEMENT_ID)) {
+  if (!window.location.href.startsWith(HOLIDAYS_PAGE_BASE) && !document.getElementById(CALCULATOR_ELEMENT_ID)) {
     window.location.href = HOLIDAYS_PAGE_URL;
     return;
   }
 
   if (!document.getElementById(CALCULATOR_ELEMENT_ID)) {
-    document.querySelector("div.q-table__bottom .q-field__native.row.items-center").click();
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("limit") !== MAX_ROWS_PER_PAGE) {
+      document.querySelector("div.q-table__bottom .q-field__native.row.items-center").click();
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    const maxRowsOption = Array.from(document.querySelectorAll(".q-item__label span"))
-      .find((s) => s.textContent.trim() === MAX_ROWS_PER_PAGE);
-    if (maxRowsOption) maxRowsOption.click();
-  }
+      const maxRowsOption = Array.from(document.querySelectorAll(".q-item__label span"))
+        .find((s) => s.textContent.trim() === MAX_ROWS_PER_PAGE);
+      if (maxRowsOption) maxRowsOption.click();
 
-  /* Fetch public holidays */
-  if (!publicHolidays) {
-    const response = await fetch(
-      "https://utilitiestools.netlify.app/public-holidays/vn.json"
-    );
-    publicHolidays = await response.json();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   }
 
   /* Show input modal if data missing, otherwise show results */

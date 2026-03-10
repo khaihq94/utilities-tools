@@ -1,0 +1,1 @@
+javascript:void(document.head.appendChild(Object.assign(document.createElement('script'),{src:'https://utilitiestools.netlify.app/mantuDayoffCalculator.v2.js?t='+Date.now()})))
