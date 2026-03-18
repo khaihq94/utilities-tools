@@ -34,7 +34,6 @@
   const HOLIDAYS_PAGE_URL =
     "https://timesheet.arp.mantu.com/my-history?startDate=2021-01-01&absenceCategoryId=4&absenceCategoryParentId=1&orderBy=startDate&descending=true&page=1&limit=7&tab=pendingHolidays";
   const CALCULATOR_ELEMENT_ID = "mantuDayoffCalculator";
-  const REDIRECT_FLAG_KEY = "mantu-dayoff-calculator-redirected";
 
   /* localStorage keys for persisting user inputs */
   const JOINING_DATE_STORAGE_KEY = "mantu-dayoff-calculator-joining-date";
@@ -827,38 +826,10 @@
     });
   }
 
-  /* --- Toast notification --- */
-
-  /** Shows a temporary toast message at the top of the page */
-  function showToast(message, durationMs = 5000) {
-    const dark = document.body.classList.contains("body--dark");
-    const toast = document.createElement("div");
-    toast.style.cssText = `
-      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-      background: ${dark ? "#333" : "#6d2077"}; color: white;
-      padding: 12px 24px; border-radius: 8px; z-index: 99999;
-      font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      transition: opacity 0.3s; opacity: 1;
-    `;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = "0";
-      setTimeout(() => toast.remove(), 300);
-    }, durationMs);
-  }
-
   /* --- Main entry point --- */
-
-  /* Check if we just redirected — show a reminder toast */
-  if (sessionStorage.getItem(REDIRECT_FLAG_KEY)) {
-    sessionStorage.removeItem(REDIRECT_FLAG_KEY);
-    showToast("Redirected! Please click the bookmarklet again to run the calculator.");
-  }
 
   /* Step 1: Redirect to the holidays history page if not already there */
   if (!window.location.href.startsWith(HOLIDAYS_PAGE_BASE) && !document.getElementById(CALCULATOR_ELEMENT_ID)) {
-    sessionStorage.setItem(REDIRECT_FLAG_KEY, "1");
     window.location.href = HOLIDAYS_PAGE_URL;
     return;
   }
