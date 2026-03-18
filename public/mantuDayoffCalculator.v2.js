@@ -12,7 +12,9 @@
  *
  * Day-off policy rules:
  * - Base allowance: 14 days/year
- * - Seniority bonus: +0.5 days per year of service (applied at joining anniversary)
+ * - Seniority bonus: +0.5 days per year of service (applied at joining anniversary, max 14 bonus days)
+ *   - Milestone rule: at every 5-year mark (5, 10, 15, ...), each 5-year block's days are doubled
+ *     (e.g. 5yr=5d, 7yr=6d, 10yr=10d, 15yr=14d capped)
  * - Carryover: up to 5 unused days carry over to next year
  * - Reset date: April 30 - carried-over days must be used before this date
  * - Carried-over days used after the reset date are forfeited
@@ -43,6 +45,9 @@
   const MAX_CARRYOVER_DAYS = 5;       /* Max days that can carry over to next year */
   const CARRYOVER_RESET_DAY = 30;               /* Day of the carryover reset date */
   const CARRYOVER_RESET_MONTH = 4;              /* Month of the carryover reset date (April) */
+
+  const MAX_SENIORITY_DAYS = 14;      /* Seniority bonus caps at this many extra days */
+  const MILESTONE_INTERVAL = 5;      /* Every 5 years of seniority, that block's days are doubled */
 
   const HALF_DAY = 0.5;                /* Half-day deduction for AM/PM entries */
   const MONTHS_PER_YEAR = 12;
@@ -109,6 +114,35 @@
       day: parseInt(parts[2], 10),
       year: parseInt(parts[3], 10),
     };
+  }
+
+  /**
+   * Calculates seniority bonus days for a given number of years since joining.
+   *
+   * Normal rule: +0.5 days per year of service.
+   * Milestone rule: at every 5-year mark (5, 10, 15, ...), the days earned in that
+   * 5-year block are doubled (2.5 becomes 5.0 per block).
+   * Between milestones, days accumulate normally on top of the last milestone total.
+   *
+   * Examples:
+   *   Year  4 → 2.0       (0.5 × 4)
+   *   Year  5 → 5.0       (1 block × 5.0)
+   *   Year  7 → 6.0       (5.0 + 0.5 × 2)
+   *   Year 10 → 10.0      (2 blocks × 5.0)
+   *   Year 15 → 14.0      (capped at MAX_SENIORITY_DAYS)
+   *
+   * @param {number} yearsSinceJoining - Completed years of service
+   * @returns {number} Seniority bonus days (capped at MAX_SENIORITY_DAYS)
+   */
+  function calculateSeniorityDays(yearsSinceJoining) {
+    const completedMilestones = Math.floor(yearsSinceJoining / MILESTONE_INTERVAL);
+    const yearsInCurrentBlock = yearsSinceJoining % MILESTONE_INTERVAL;
+
+    /* Each completed 5-year block: 0.5 × 5 = 2.5, doubled = 5.0 */
+    const milestoneDays = completedMilestones * SENIORITY_INCREMENT * MILESTONE_INTERVAL * 2;
+    const currentBlockDays = yearsInCurrentBlock * SENIORITY_INCREMENT;
+
+    return Math.min(milestoneDays + currentBlockDays, MAX_SENIORITY_DAYS);
   }
 
   /* --- Data access (localStorage + DOM scraping) --- */
@@ -297,6 +331,10 @@
     const yearsSinceJoining = year - joiningYear;
     const previousYearsSinceJoining = Math.max(0, yearsSinceJoining - 1);
 
+    /* Seniority bonus with milestone doubling every 5 years, capped at MAX_SENIORITY_DAYS */
+    const seniorityDaysCurrent = calculateSeniorityDays(yearsSinceJoining);
+    const seniorityDaysPrevious = calculateSeniorityDays(previousYearsSinceJoining);
+
     /* Calculate proportional allowance split at the joining anniversary */
     let fullMonthsBeforeAnniversary = 0;
     let fullMonthsAfterAnniversary = MONTHS_PER_YEAR - joiningMonth;
@@ -329,9 +367,9 @@
     }
 
     const totalAllowedDayoffs =
-      ((BASE_DAYOFF_ALLOWANCE + previousYearsSinceJoining * SENIORITY_INCREMENT) / MONTHS_PER_YEAR) *
+      ((BASE_DAYOFF_ALLOWANCE + seniorityDaysPrevious) / MONTHS_PER_YEAR) *
         (fullMonthsBeforeAnniversary + daysBeforeAnniversaryInMonth / anniversaryMonthLength) +
-      ((BASE_DAYOFF_ALLOWANCE + yearsSinceJoining * SENIORITY_INCREMENT) / MONTHS_PER_YEAR) *
+      ((BASE_DAYOFF_ALLOWANCE + seniorityDaysCurrent) / MONTHS_PER_YEAR) *
         (daysAfterAnniversaryInMonth / anniversaryMonthLength + fullMonthsAfterAnniversary);
 
     debugLog(`totalAllowedDayoff: ${totalAllowedDayoffs}`);
@@ -439,6 +477,15 @@
     const joiningDate = getJoiningDate();
     const remaining2025 = getRemaining2025Dayoff();
     const htmlParts = [];
+
+    const yearsSinceJoining = CURRENT_YEAR - joiningDate.year;
+    const seniorityDays = calculateSeniorityDays(yearsSinceJoining);
+    const joiningDateFormatted = `${joiningDate.dayLabel}/${joiningDate.monthLabel}/${joiningDate.yearLabel}`;
+
+    shadowRoot.querySelector("#joiningInfo").innerHTML =
+      `Your joining date is: <b>${joiningDateFormatted}</b>. ` +
+      `You've worked for Mantu <b>${yearsSinceJoining}</b> year(s) ` +
+      `and your seniority days of <b>${CURRENT_YEAR}</b> is <b>${seniorityDays}</b>.`;
 
     /* v2: Start from FIRST_CALCULATED_YEAR, seed with user-inputted 2025 remaining */
     let carriedOverDays = remaining2025;
@@ -606,8 +653,8 @@
           <input type="date" id="joiningDate" value="${existingJoiningDate}"/>
 
           <label for="remaining2025">Number of day-offs carried over from 2025</label>
-          <input type="number" id="remaining2025" min="0" max="${MAX_CARRYOVER_DAYS}" step="${DAYOFF_INPUT_STEP}" value="${existingRemaining}"/>
-          <div class="error" id="remaining2025Error">Value must be between 0 and ${MAX_CARRYOVER_DAYS}, in increments of ${DAYOFF_INPUT_STEP}</div>
+          <input type="number" id="remaining2025" min="0" step="${DAYOFF_INPUT_STEP}" value="${existingRemaining}"/>
+          <div class="error" id="remaining2025Error">Value must be 0 or above, in increments of ${DAYOFF_INPUT_STEP}</div>
 
           <div class="footer">
             <button id="cancelBtn" class="btn secondaryBtn">Cancel</button>
@@ -631,7 +678,6 @@
       const isRemainingValid =
         !isNaN(remainingVal) &&
         remainingVal >= 0 &&
-        remainingVal <= MAX_CARRYOVER_DAYS &&
         remainingVal % DAYOFF_INPUT_STEP === 0;
 
       errorEl.style.display = remainingInput.value !== "" && !isRemainingValid ? "block" : "none";
@@ -653,7 +699,6 @@
       const isRemainingValid =
         !isNaN(remainingVal) &&
         remainingVal >= 0 &&
-        remainingVal <= MAX_CARRYOVER_DAYS &&
         remainingVal % DAYOFF_INPUT_STEP === 0;
       if (!joiningDateVal || !isRemainingValid) return;
 
@@ -757,6 +802,7 @@
           </div>
           <i>(*) The information below may contain discrepancies.<br/>
           For the most accurate details, please contact HR.</i>
+          <p id="joiningInfo" style="margin: 10px 0;"></p>
           <div id="dayoffCalcInfo" class="dayoffs-calc-info"></div>
           <div class="footer">
             <button id="updateBtn" class="btn primaryBtn">Update</button>
