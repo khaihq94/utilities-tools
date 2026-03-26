@@ -209,22 +209,13 @@
         console.warn('[VNABookingLookup] Last name input not found');
       }
 
-      // Press the search/submit button
-      const submitBtn = document.querySelector(
-        'button[type="submit"], button.btn-search, button.search-btn, form button'
-      );
+      // Click the search button
+      const submitBtn = document.querySelector('button.btnCodeFlyFinding');
       if (submitBtn) {
         submitBtn.click();
         console.log('[VNABookingLookup] Clicked submit button');
       } else {
-        // Fallback: press Enter on the last filled input
-        const lastFilled = lastNameInput || bookingCodeInput;
-        if (lastFilled) {
-          lastFilled.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-          lastFilled.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', bubbles: true }));
-          lastFilled.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
-          console.log('[VNABookingLookup] Dispatched Enter key');
-        }
+        console.warn('[VNABookingLookup] Submit button (.btnCodeFlyFinding) not found');
       }
     }, INPUT_FILL_DELAY_MS);
   });
